@@ -1,15 +1,14 @@
 #include <python2.7/Python.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include "kdtree.h"
+#include "dbscan.h"
 
-#define NOISE 0
-#define BORDER 1
-#define CORE 2
+// Note this is also defined in kd_tree.h
+#define DIMENSIONS 2
 
-
+/* Sole purpose is a wrapper function. */
 static PyObject* 
-dbscan(PyObject* self, PyObject* args)
+dbscan_wrapper(PyObject* self, PyObject* args)
 {
     PyObject* list;
     double threshold_dist;
@@ -27,6 +26,7 @@ dbscan(PyObject* self, PyObject* args)
     int points[list_length][DIMENSIONS];
 
     /* Parsing the tuples in the list into pairs of integers */
+    /* Quite a lot of overhead, but it is better than using python. I think. */
     int x, y, num_points = 0;
     PyObject* tuple;
     for (i = 0; i < list_length; i++)
@@ -42,26 +42,82 @@ dbscan(PyObject* self, PyObject* args)
         points[i][1] = y;
         num_points++;
     }
+
+    /* The actual scanning */
+    DynamicArray* clusters = dbscan( points, num_points, threshold_dist, threshold_num );
+
+    // Turning the result into something python can use.
     
-    /* Now lets actually do some scanning */
-    KD_Tree* tree = construct_kd_tree(points, num_points);    
+    int j;
+    int k;
+    DynamicArray* cluster;
+    // See below for why this is - 1
+    PyObject* py_clusters = PyList_New( (*clusters).num_elements - 1 );
+    PyObject* py_cluster;
+    PyObject* pt;
+    DBScanPoint* element;
 
-    int pt_to_find[] = {100, 100};
+    // I use element 0 to store all the elements to make it 
+    // easy to free them.
+    for (i = 1; i < (*clusters).num_elements; i++)
+    {
+        cluster = dynamic_array_get_element( clusters, i );
+        py_cluster = PyList_New( (*cluster).num_elements );
 
-    //print_all_node_values(tree);
+        for (j = 0; j < (*cluster).num_elements; j++ )
+        {
+            pt = PyTuple_New(DIMENSIONS);             
+            element = dynamic_array_get_element(cluster, j);
 
-    int* nearest_neighbor = get_nearest_neighbor( tree,  pt_to_find );
-    printf("(%d, %d) is the nearest to (%d, %d)\n", 
-            nearest_neighbor[0], nearest_neighbor[1], pt_to_find[0], pt_to_find[1]);
+            for (k = 0; k < DIMENSIONS; k++)
+            {
+                PyTuple_SetItem(pt, k, Py_BuildValue( "i", (*element).location[k] ));
+            }
 
-    free_tree(tree);
-    return Py_BuildValue("i", 0);
+            PyList_SetItem( py_cluster, j, pt );
+            
+        }
+
+        PyList_SetItem(py_clusters, i-1, py_cluster);;
+        
+    }
+
+    // Freeing everything. This is a sign of awful design and I
+    // apologize for it but I am very, very new to c and 
+    // did not imagine this would be as hard as it is.
+    DynamicArray* all_points = dynamic_array_get_element( clusters, 0 );
+    DBScanPoint* pt_to_free;
+    DynamicArray* arr;
+    for ( i = 0; i < num_points; i++ )
+    {
+        pt_to_free = dynamic_array_get_element( all_points, i );
+        arr = (*pt_to_free).points_in_threshold;
+        free( (*arr)._elements );
+        free(arr); 
+        free(pt_to_free);
+    }
+
+    free( (*all_points)._elements );
+    free( all_points );
+
+    DynamicArray* inner_arr;
+    for ( i = 1; i < (*clusters).num_elements; i++ )
+    {
+        inner_arr = dynamic_array_get_element( clusters, i );
+        free( (*inner_arr)._elements );
+        free( inner_arr );
+    }
+
+    free( (*clusters)._elements );
+    free( clusters );
+
+    return py_clusters;
 }
 
 
-static PyMethodDef DBScanMethods[] =
+static PyMethodDef ExtensionMethods[] =
 {
-    {"dbscan", dbscan, METH_VARARGS, "Run dbscan"},
+    {"dbscan", dbscan_wrapper, METH_VARARGS, "Run dbscan"},
     {NULL, NULL, 0, NULL}
 };
 
@@ -69,7 +125,5 @@ static PyMethodDef DBScanMethods[] =
 PyMODINIT_FUNC
 initdbscan(void)
 {
-    (void) Py_InitModule("dbscan", DBScanMethods);
+    (void) Py_InitModule("dbscan", ExtensionMethods);
 }
-
-    

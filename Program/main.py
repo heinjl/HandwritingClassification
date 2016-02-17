@@ -4,7 +4,7 @@ import sys
 import pygame
 pygame.init()
 from classifier import Classifier
-# import dbscan
+import dbscan
 import py_dbscan
 
 import time
@@ -22,6 +22,9 @@ current = pygame.mouse.get_pos()
 save_path = '/home/coleman/Pictures/saved.bmp'
 
 
+time_both = False 
+use_c_dbscan = False
+
 
 def check_input( display, classifier):
     global prev, current, mouse_was_pressed, eraser_mode, save_path
@@ -33,18 +36,33 @@ def check_input( display, classifier):
 
             if event.key == pygame.K_RETURN:
                 print 'Enter pressed'
-                vectors = py_dbscan.get_square_cluster_image_vectors( display, (28, 28) )
-                # py_dbscan.dbscan( display )
-                # dbscan.dbscanV2( display )
+
+                if time_both:
+                    c_start = time.time()
+                    vectors = py_dbscan.c_classify_image_digits( display, image_size )
+                    c_time = time.time() - c_start
+
+                    python_start = time.time()
+                    py_dbscan.get_square_cluster_image_vectors( display, image_size )
+                    python_time = time.time() - python_start
                 
-                # vectors = []
+                elif use_c_dbscan:
+                    vectors = py_dbscan.c_classify_image_digits( display, image_size )
+                else: 
+                    vectors = py_dbscan.get_square_cluster_image_vectors( display, image_size )
 
-                # title = ''
+                    
+                title = ''
                 for v in vectors:
-                    print classifier.predict(v)
-                    # title += str(classifier.predict(v))
-                # pygame.display.set_caption(title)
+                    title += str(classifier.predict(v)[0])
+                pygame.display.set_caption(title)
 
+                print '\n\nPrediction: {0}'.format(title)
+                if time_both:
+                    print 'Python time: {0:.4f}\nC time: {1:.4f}\nPython/C: {2:0.4f}\n\n'\
+                            .format(python_time, c_time, python_time/c_time)
+                else:
+                    print '\n\n'
 
                 # surf = dbscan.color_clusters( display )
                 # display.blit( surf, (0, 0) )
@@ -96,11 +114,11 @@ def exit_application():
 
 def main():
     
+    classifier = Classifier()
     background_color = white
     display = pygame.display.set_mode(size)
     display.fill(background_color)
     clock = pygame.time.Clock()
-    classifier = Classifier()
 
     while True:
         clock.tick(60)
